@@ -9,9 +9,7 @@ mod_server(id, api)
 \arguments{
 \item{id}{Internal parameters for {shiny}.}
 
-\item{con}{Connection object for Requal database.}
-
-\item{user_id}{ID of the Requal user.}
+\item{api}{API connection object.}
 }
 \description{
 wordcloud Server Functions
