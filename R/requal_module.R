@@ -1,38 +1,10 @@
-# --- Prerequisites ---
-# Ensure these packages are installed:
-# install.packages(c("shiny", "shinyjs", "readtext", "pdftools", "dplyr", "stats"))
-
-library(shiny)
-library(shinyjs)
-library(readtext)
-library(pdftools)
-library(dplyr)
-library(stats)
-
-# --- Helper Function: Coordinate-Based PDF Parser ---
-# This is the advanced parser from our previous discussion.
-# It should be available to the server function.
-parse_pdf_coordinates <- function(
-    file_path,
-    num_columns = 2,
-    keep_empty_lines = TRUE
-) {
-    pages_text <- pdf_text(file_path, raw = TRUE)
-
-    # Combine pages into a single text block
-    combined_text <- paste(pages_text, collapse = "\n\n")
-
-    return(combined_text)
-}
-
-
 # --- UI Function (Unchanged) ---
 mod_ui <- function(id) {
     ns <- NS(id)
     tagList(
         shinyjs::useShinyjs(),
         column(
-            width = 4,
+            width = 3,
             fileInput(
                 ns("file_input"),
                 "Choose Text Files",
@@ -51,11 +23,19 @@ mod_ui <- function(id) {
                     ".rtf"
                 )
             ),
+            checkboxInput(
+                ns("pdf_stream"),
+                "PDF raw stream order (recommended for multiple columns)",
+                value = TRUE
+            ),
             uiOutput(ns("text_selector")),
-            actionButton(ns("edit_button"), "Edit"),
-            actionButton(ns("delete_button"), "Delete"),
-            br(),
-            br(),
+            div(
+                id = ns("delete_div"),
+                style = "display:none;",
+                actionButton(ns("delete_button"), "Delete"),
+                br(),
+                br()
+            ),
             div(
                 id = ns("edit_buttons"),
                 style = "display:none;",
@@ -69,23 +49,11 @@ mod_ui <- function(id) {
                     "Cancel",
                     class = "btn-secondary"
                 )
-            ),
-            br(),
-            div(
-                id = ns("pdf_tools"),
-                style = "display:none;",
-                # Changed the button label for clarity
-                actionButton(
-                    ns("parse_columns_button"),
-                    "Re-parse PDF with pdftools",
-                    class = "btn-info btn-sm"
-                )
             )
         ),
         column(
-            width = 8,
-            uiOutput(ns("text_display")),
-            uiOutput(ns("content_area"))
+            width = 9,
+            uiOutput(ns("preview_area"))
         )
     )
 }
@@ -94,18 +62,21 @@ mod_ui <- function(id) {
 mod_server <- function(id, api) {
     moduleServer(id, function(input, output, session) {
         ns <- session$ns
-        loc <- reactiveValues(edit_mode = FALSE)
+        loc <- reactiveValues()
 
-        # **CHANGE 1: Added 'document_path' to store the original file location**
         loc$text_df <- data.frame(
             document_id = integer(),
             document_name = character(),
             document_type = character(),
-            document_path = character(), # <-- NEW COLUMN
+            document_path = character(),
             document_text = character(),
             document_description = character(),
             stringsAsFactors = FALSE
         )
+
+        read_pdf_stream <- function(file_path) {
+            pdftools::pdf_text(file_path, raw = TRUE)
+        }
 
         observeEvent(input$file_input, {
             req(input$file_input)
@@ -119,76 +90,111 @@ mod_server <- function(id, api) {
             text_content_list <- list()
             for (i in 1:nrow(files)) {
                 progress$inc(1 / nrow(files), detail = files$name[i])
-
-                # The readtext function is used here for initial text extraction
+                # Use readtext for all files
                 temp_content <- readtext::readtext(files$datapath[i])
-                temp_content$text <- enc2utf8(temp_content$text)
                 text_content_list[[i]] <- temp_content
             }
+
+            # Combine all readtext results
             text_content <- do.call(rbind, text_content_list)
 
+            # Get current max ID so that new IDs can be assigned on top of it
             max_id <- if (nrow(loc$text_df) > 0) {
                 max(loc$text_df$document_id)
             } else {
                 0
             }
 
-            # **CHANGE 2: Save the 'datapath' for each file**
+            # Construct the dataframe with readtext results
             new_data <- data.frame(
                 document_id = (max_id + 1):(max_id + nrow(files)),
                 document_name = files$name,
                 document_type = files$type,
-                document_path = files$datapath, # <-- SAVING THE PATH
-                document_text = text_content$text,
+                document_path = files$datapath,
+                document_text = enc2utf8(text_content$text),
                 document_description = "",
                 stringsAsFactors = FALSE
             )
+
+            # If PDF stream processing is requested, replace PDF text
+            if (input$pdf_stream == TRUE) {
+                for (i in 1:nrow(new_data)) {
+                    if (new_data$document_type[i] == "application/pdf") {
+                        stream_content <- read_pdf_stream(new_data$document_path[
+                            i
+                        ])
+                        # Convert to single string if multiple pages
+                        if (length(stream_content) > 1) {
+                            stream_content <- paste(
+                                stream_content,
+                                collapse = "\n\n"
+                            )
+                        }
+                        new_data$document_text[i] <- enc2utf8(stream_content)
+                    }
+                }
+            }
+
             loc$text_df <- rbind(loc$text_df, new_data)
+            shinyjs::reset("file_input")
         })
 
-        # Render UI for selecting text (unchanged)
+        # Render UI for selecting text
         output$text_selector <- renderUI({
-            req(nrow(loc$text_df) > 0)
-            selectInput(
-                ns("text_select"),
-                "Select Text",
-                choices = setNames(
-                    loc$text_df$document_id,
-                    loc$text_df$document_name
+            if (nrow(loc$text_df) > 0) {
+                choices <- c(
+                    "Select a document..." = "",
+                    setNames(
+                        loc$text_df$document_id,
+                        loc$text_df$document_name
+                    )
                 )
-            )
+                selectInput(
+                    ns("text_select"),
+                    "Select Text",
+                    choices = choices,
+                    selected = ""
+                )
+            } else {
+                selectInput(
+                    ns("text_select"),
+                    "Select Text",
+                    choices = c("No documents available" = ""),
+                    selected = ""
+                )
+            }
         })
 
-        # ... (Other UI rendering parts remain the same) ...
-        # (text_display and content_area rendering are unchanged)
-        output$text_display <- renderUI({
-            req(input$text_select, nrow(loc$text_df) > 0)
-            selected_text <- loc$text_df[
-                loc$text_df$document_id == as.numeric(input$text_select),
-            ]
-            req(nrow(selected_text) > 0)
-
-            tagList(
-                h3(selected_text$document_name),
-                p(selected_text$document_description)
-            )
+        # Show/hide delete button based on selection
+        observeEvent(input$text_select, {
+            if (!is.null(input$text_select) && input$text_select != "") {
+                shinyjs::show("delete_div")
+            } else {
+                shinyjs::hide("delete_div")
+                shinyjs::hide("edit_buttons")
+            }
         })
-        output$content_area <- renderUI({
-            req(input$text_select, nrow(loc$text_df) > 0)
-            selected_text <- loc$text_df[
-                loc$text_df$document_id == as.numeric(input$text_select),
-            ]
-            req(nrow(selected_text) > 0)
 
-            if (loc$edit_mode) {
-                # Show editable form
+        output$preview_area <- renderUI({
+            if (
+                !is.null(input$text_select) &&
+                    input$text_select != "" &&
+                    nrow(loc$text_df) > 0
+            ) {
+                selected_text <- loc$text_df[
+                    loc$text_df$document_id == as.integer(input$text_select),
+                ]
+                req(nrow(selected_text) > 0)
+
+                # Show editable form with updateOn argument
                 tagList(
-                    h4("Edit Document"),
+                    h4("Document Preview"),
                     textInput(
                         ns("edit_title"),
                         "Document Name",
                         value = selected_text$document_name,
-                        width = "100%"
+                        width = "100%",
+                        updateOn = "blur"
                     ),
                     textAreaInput(
                         ns("edit_description"),
@@ -196,65 +202,45 @@ mod_server <- function(id, api) {
                         value = selected_text$document_description,
                         rows = 3,
                         width = "100%",
-                        resize = "vertical"
+                        resize = "vertical",
+                        updateOn = "blur"
                     ),
                     textAreaInput(
                         ns("edit_content"),
                         "Content",
                         value = selected_text$document_text,
-                        rows = 20,
+                        rows = 100,
                         width = "100%",
-                        height = "500px",
-                        resize = "vertical"
+                        height = "100%",
+                        resize = "vertical",
+                        updateOn = "blur"
                     )
                 )
             } else {
-                # Show preview with preserved whitespace
+                # Show empty state when no selection
                 tagList(
-                    tags$pre(
-                        style = "white-space: pre-wrap; font-family: inherit; 
-                                word-wrap: break-word; background: none; 
-                                border: none; padding: 0; margin: 0;",
-                        selected_text$document_text
-                    )
+                    h4("Document Preview"),
+                    p("Select a document to view and edit its content.")
                 )
             }
         })
-        observe({
-            req(input$text_select, nrow(loc$text_df) > 0)
-            selected_text <- loc$text_df[
-                loc$text_df$document_id == as.numeric(input$text_select),
-            ]
 
-            if (
-                nrow(selected_text) > 0 &&
-                    loc$edit_mode &&
-                    grepl(
-                        "pdf|application/pdf",
-                        selected_text$document_type,
-                        ignore.case = TRUE
-                    )
-            ) {
-                shinyjs::show("pdf_tools")
-            } else {
-                shinyjs::hide("pdf_tools")
+        # Show save/cancel buttons when any edit is made
+        observeEvent(
+            c(input$edit_title, input$edit_description, input$edit_content),
+            {
+                req(input$text_select, nrow(loc$text_df) > 0)
+                # Show/hide appropriate buttons
+                shinyjs::show("edit_buttons")
             }
-        })
-        observeEvent(input$edit_button, {
-            req(input$text_select, nrow(loc$text_df) > 0)
-            loc$edit_mode <- TRUE
+        )
 
-            # Show/hide appropriate buttons
-            shinyjs::hide("edit_button")
-            shinyjs::hide("delete_button")
-            shinyjs::show("edit_buttons")
-        })
         observeEvent(input$save_button, {
             req(input$text_select)
 
             # Update the data frame
             row_index <- which(
-                loc$text_df$document_id == as.numeric(input$text_select)
+                loc$text_df$document_id == as.integer(input$text_select)
             )
             loc$text_df[row_index, "document_name"] <- input$edit_title
             loc$text_df[
@@ -274,42 +260,24 @@ mod_server <- function(id, api) {
                 selected = input$text_select
             )
 
-            # Exit edit mode
-            loc$edit_mode <- FALSE
-
-            # Show/hide appropriate buttons
-            shinyjs::show("edit_button")
-            shinyjs::show("delete_button")
+            # Hide edit buttons after saving
             shinyjs::hide("edit_buttons")
-            shinyjs::hide("pdf_tools")
         })
+
         observeEvent(input$cancel_button, {
-            loc$edit_mode <- FALSE
-
-            # Show/hide appropriate buttons
-            shinyjs::show("edit_button")
-            shinyjs::show("delete_button")
+            # Hide edit buttons after canceling
             shinyjs::hide("edit_buttons")
-            shinyjs::hide("pdf_tools")
         })
-        observeEvent(input$text_select, {
-            loc$edit_mode <- FALSE
 
-            # Show/hide appropriate buttons
-            shinyjs::show("edit_button")
-            shinyjs::show("delete_button")
-            shinyjs::hide("edit_buttons")
-            shinyjs::hide("pdf_tools")
-        })
         observeEvent(input$delete_button, {
             req(input$text_select, nrow(loc$text_df) > 0)
 
             # Remove the selected row
             loc$text_df <- loc$text_df[
-                loc$text_df$document_id != as.numeric(input$text_select),
+                loc$text_df$document_id != as.integer(input$text_select),
             ]
 
-            # Update select input or hide if no documents remain
+            # Update select input
             if (nrow(loc$text_df) > 0) {
                 updateSelectInput(
                     session,
@@ -320,62 +288,6 @@ mod_server <- function(id, api) {
                     )
                 )
             }
-        })
-
-        # **CHANGE 3: Reworked the entire PDF parsing logic**
-        observeEvent(input$parse_columns_button, {
-            req(input$text_select)
-            shinyjs::disable("parse_columns_button") # Disable button during processing
-
-            # Find the original file path from our data frame
-            selected_doc <- loc$text_df[
-                loc$text_df$document_id == input$text_select,
-            ]
-            file_path <- selected_doc$document_path
-
-            # Check if the temporary file still exists
-            if (is.null(file_path) || !file.exists(file_path)) {
-                showNotification(
-                    "Original file not found. Please re-upload the PDF.",
-                    type = "error"
-                )
-                shinyjs::enable("parse_columns_button")
-                return()
-            }
-
-            showNotification(
-                "Parsing PDF with pdftools... this may take a moment.",
-                type = "message"
-            )
-
-            # Use tryCatch to handle potential errors from the parsing function
-            parsed_content <- tryCatch(
-                {
-                    parse_pdf_coordinates(file_path)
-                },
-                error = function(e) {
-                    showNotification(
-                        paste("PDF parsing failed:", e$message),
-                        type = "error"
-                    )
-                    return(NULL) # Return NULL on failure
-                }
-            )
-
-            # If parsing was successful, update the editor
-            if (!is.null(parsed_content)) {
-                updateTextAreaInput(
-                    session,
-                    "edit_content",
-                    value = parsed_content
-                )
-                showNotification(
-                    "PDF successfully re-parsed!",
-                    type = "message"
-                )
-            }
-
-            shinyjs::enable("parse_columns_button") # Re-enable the button
         })
     })
 }
