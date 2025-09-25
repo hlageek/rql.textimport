@@ -1,4 +1,12 @@
-# --- UI Function ---
+#' rql.textimport UI Function
+#'
+#' @description A shiny Module.
+#'
+#' @param id,input,output,session Internal parameters for {shiny}.
+#'
+#' @export
+#'
+#' @importFrom shiny NS tagList
 mod_ui <- function(id) {
     ns <- NS(id)
     tagList(
@@ -67,7 +75,11 @@ mod_ui <- function(id) {
     )
 }
 
-# --- Server Function ---
+#' rql.textimport Server Functions
+#'
+#' @param id Internal parameters for {shiny}.
+#' @param api Connection object for Requal database.
+#' @export
 mod_server <- function(id, api) {
     moduleServer(id, function(input, output, session) {
         ns <- session$ns

@@ -1,12 +1,12 @@
-Package: rql.wordcloud
-Title: What the Package Does (One Line, Title Case)
-Version: 0.0.0.9000
+Package: rql.textimport
+Title: Convert and Import Documents 
+Version: 0.0.0.9005
 Authors@R: 
-    person("First", "Last", , "first.last@example.com", role = c("aut", "cre"))
-Description: What the package does (one paragraph).
-License: `use_mit_license()`, `use_gpl3_license()` or friends to pick a
-    license
+    person("Radim", "Hladík", , "requal@requal.app", role = c("aut", "cre"))
+Description: Converts documents from multiple formats (PDF, Word, plain text, CSV, and more) into standardized plain text for transcript analysis in requal. Supports bulk file processing with preview and editing capabilities before import. Uses readtext, pdftools, and other specialized libraries for expanded text extraction across diverse file types.
+License: MIT
 Config/requal/module: TRUE
+Config/requal/displayName: Import transcripts
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)
 RoxygenNote: 7.3.3

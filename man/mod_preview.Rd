@@ -2,10 +2,10 @@
 % Please edit documentation in R/mod_preview.R
 \name{mod_preview}
 \alias{mod_preview}
-\title{Launch the Wordcloud Shiny App}
+\title{Launch the Extension as a Shiny App}
 \usage{
 mod_preview()
 }
 \description{
-This function launches the Shiny app for the wordcloud module.
+This function launches the Shiny app for a Requal extension module.
 }
